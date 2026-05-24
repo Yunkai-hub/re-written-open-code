@@ -2,7 +2,7 @@
 
 > 项目目标：使用 **Python + LangGraph** 复刻开源 opencode（以 `sst/opencode` 为参考），面向可持续演进到产品级能力。
 >
-> 更新时间：2026-05-17
+> 更新时间：2026-05-21
 
 ---
 
@@ -89,14 +89,18 @@
 
 ---
 
-## Phase 2（下一阶段）— 交互体验与模型层增强
-**状态**：⬜ 未开始
+## Phase 2（进行中）— 交互体验与模型层增强
+**状态**：🟨 已完成核心实现，待补充手工 E2E 验证
 
-**计划内容**：
-1. 流式 token 输出（边生成边显示）
-2. 多 Provider Router（Anthropic/OpenAI/可扩展）
-3. 更标准的 tool-call 事件路由（将 `route_event` 节点显式化）
-4. 基础回归测试（pytest）
+**已完成**：
+1. 流式 token 输出（CLI 基于 `astream_events` 增量渲染）
+2. 多 Provider Router（Anthropic/OpenAI 基础切换）
+3. 显式路由节点（`route_event`）
+4. 基础回归测试（pytest，10 个用例已通过）
+
+**待继续完善**：
+- streaming 事件展示体验打磨（tool begin/end、异常路径提示）
+- 增加更细粒度 graph 行为测试
 
 ---
 
@@ -151,9 +155,9 @@
 ## 4. 下一次继续建议（从这里接）
 
 建议按以下顺序继续：
-1. 先跑完 [docs/phase-1-manual-test.md](phase-1-manual-test.md) 的 5 个剧本并记录结果
-2. 若剧本通过，进入 Phase 2：优先做**流式输出**
-3. 同步补 pytest：权限评估、工具参数校验、graph 路由
+1. 跑完 [docs/phase-1-manual-test.md](phase-1-manual-test.md) 剧本并补记录（尤其是 provider=openai 分支）
+2. 增加 route_event / exec_tools 的行为级测试（包含 tool_call 分支覆盖）
+3. 进入 Phase 3：context overflow + compaction
 
 ---
 

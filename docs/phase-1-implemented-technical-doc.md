@@ -1,23 +1,25 @@
-# Phase 1 已实现技术文档（opencode-py）
+# 已实现技术文档（Phase 1 + Phase 2）
 
-> 本文档只描述**当前已经落地**的实现，不包含未来规划。
+> 本文档描述当前已经落地的实现（Phase 1 MVP + Phase 2 核心增强）。
 >
-> 对齐目标：Python + LangGraph 复刻 opencode 的最小可用链路（MVP）。
+> 对齐目标：Python + LangGraph 复刻 opencode 的核心运行链路，并逐步补齐产品化能力。
 
 ---
 
 ## 1. 实现范围总览
 
-Phase 1 已实现能力：
+当前已实现能力（Phase 1 + Phase 2）：
 
 1. 基于 LangGraph 的基础 Agent 循环（含工具调用回路）
-2. Anthropic 模型接入（`langchain-anthropic`）
-3. 工具系统（定义、注册、执行）
-4. 权限系统（allow / deny / ask；once / always / reject）
-5. SQLite 会话持久化与 resume
-6. CLI 交互入口（chat / resume / doctor）
+2. 多 Provider Router（Anthropic / OpenAI 基础切换）
+3. 显式路由节点 `route_event`
+4. 工具系统（定义、注册、执行）
+5. 权限系统（allow / deny / ask；once / always / reject）
+6. SQLite 会话持久化与 resume
+7. CLI 流式输出（基于 `astream_events`）
+8. 基础回归测试（pytest）
 
-核心未实现（不在本文范围）：MCP、sub-agent task、TUI、上下文压缩、多 Provider router。
+核心未实现（不在本文范围）：MCP、sub-agent task、TUI、上下文压缩。
 
 ---
 
@@ -91,7 +93,8 @@ Phase 1 已实现能力：
 START
   → prepare_input
   → llm_call
-  → (if AIMessage has tool_calls) exec_tools
+  → route_event
+  → (exec_tools | END)
   → decide_next (max_steps)
   → llm_call / END
 ```
@@ -103,17 +106,21 @@ START
    - 初始化 `step_count`
 
 2. `llm_call`
-   - 构建 Anthropic chat model
+   - 通过 provider router 构建 chat model（Anthropic/OpenAI）
    - 绑定工具 schema
    - 基于当前消息调用 LLM
    - 写回 `AIMessage` 到 state
 
-3. `exec_tools`
+3. `route_event`
+   - 检查上一条 `AIMessage` 是否包含 `tool_calls`
+   - 产出分支路由（`exec_tools` 或 `end`）
+
+4. `exec_tools`
    - 解析 `AIMessage.tool_calls`
    - 对每个工具调用执行：权限评估 → 参数校验 → 执行 → 产出 `ToolMessage`
    - 若用户选 `always`，将对应 allow 规则追加进 `approved_ruleset`
 
-4. `decide_next`
+5. `decide_next`
    - 使用 `max_steps` 控制循环上限
 
 ---
@@ -192,17 +199,18 @@ START
 
 ## 6. 模型接入实现细节
 
-模型接入在 [src/opencode_py/agent/graph.py](../src/opencode_py/agent/graph.py) 的 `_build_llm()`。
+模型接入在 [src/opencode_py/providers/router.py](../src/opencode_py/providers/router.py) 与 [src/opencode_py/agent/graph.py](../src/opencode_py/agent/graph.py) 的 `_build_llm()`。
 
 当前实现：
-- Provider：Anthropic
-- 类：`ChatAnthropic`
+- Provider：`anthropic` / `openai`
+- 路由函数：`build_chat_model(agent, settings)`
 - 工具绑定：`llm.bind_tools(tools)`
 - 模型配置来源：`AgentConfig` + `Settings`
 
 已完成：
 - LLM 可依据工具 schema 触发 tool calls
 - 工具结果通过 `ToolMessage` 回注下一轮推理
+- provider 缺 key 时给出明确错误
 
 ---
 
@@ -227,6 +235,10 @@ START
 
 CLI 位于 [src/opencode_py/cli.py](../src/opencode_py/cli.py)。
 
+当前输出模式：
+- 主路径使用 `graph.astream_events(..., version="v2")` 做增量渲染
+- 流式事件不可用时，回落到最终消息渲染
+
 已实现命令：
 1. `chat [message]`
    - 创建新 session（新 thread_id）
@@ -245,10 +257,11 @@ CLI 位于 [src/opencode_py/cli.py](../src/opencode_py/cli.py)。
 
 ## 9. 已完成验证
 
-已完成 smoke 验证：
+已完成验证：
 1. 依赖安装与导入成功
 2. Graph 编译成功
 3. CLI `--help` / `doctor` 正常
+4. pytest 回归测试通过（10 passed）
 
 手工 E2E 验证文档：
 - [docs/phase-1-manual-test.md](phase-1-manual-test.md)
@@ -257,12 +270,11 @@ CLI 位于 [src/opencode_py/cli.py](../src/opencode_py/cli.py)。
 
 ## 10. 当前已知限制（真实状态）
 
-1. 未实现流式 token 增量输出（当前按 step 返回）
-2. 未实现 MCP 工具接入
-3. 未实现 sub-agent / task tool
-4. 未实现 context overflow 检测与 compaction
-5. 未实现多 Provider router（目前 Anthropic-only）
-6. 未实现 TUI（当前为 CLI + Rich）
+1. 未实现 MCP 工具接入
+2. 未实现 sub-agent / task tool
+3. 未实现 context overflow 检测与 compaction
+4. 未实现 TUI（当前为 CLI + Rich）
+5. 流式事件展示仍是 MVP 形态（可读性与状态信息待优化）
 
 ---
 

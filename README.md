@@ -2,7 +2,7 @@
 
 Python + LangGraph reimplementation of [sst/opencode](https://github.com/sst/opencode).
 
-Status: **Phase 1 MVP** — end-to-end agent loop, tool calling, permission ask, SQLite session persistence.
+Status: **Phase 2 (in progress)** — provider router, explicit route node, streaming CLI output, and baseline regression tests are implemented.
 
 ## Layout
 
@@ -19,8 +19,14 @@ Status: **Phase 1 MVP** — end-to-end agent loop, tool calling, permission ask,
 # 2. install deps
 uv sync
 
-# 3. set API key
+# 3. choose provider + set API key
+# Anthropic (default)
+export OPENCODE_PROVIDER=anthropic
 export ANTHROPIC_API_KEY=sk-ant-...
+
+# OR OpenAI
+# export OPENCODE_PROVIDER=openai
+# export OPENAI_API_KEY=sk-...
 
 # 4. environment check
 uv run opencode-py doctor
@@ -47,6 +53,9 @@ uv run opencode-py resume thr_abc123 "and now show me bash.py"
 - TUI (Phase 4): currently plain `rich` REPL
 - MCP integration (Phase 5)
 - Sub-agents / `task` tool (Phase 6)
-- Multi-provider router (Phase 2): only Anthropic for now
-- Streaming token output (Phase 2): currently awaits full response per step
+- Full MCP integration (Phase 5)
+- Sub-agents / `task` tool (Phase 6)
+- Context compaction (Phase 3)
+- Dedicated TUI (Phase 4)
+- Advanced streaming event UX polish (current streaming is terminal-first MVP)
 - Context compaction (Phase 3): not yet
