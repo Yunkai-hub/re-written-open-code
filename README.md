@@ -2,7 +2,7 @@
 
 Python + LangGraph reimplementation of [sst/opencode](https://github.com/sst/opencode).
 
-Status: **Phase 2 (in progress)** — provider router, explicit route node, streaming CLI output, and baseline regression tests are implemented.
+Status: **Phase 3 (in progress)** — session governance (overflow detection, auto-compaction, sessions/fork metadata) is implemented on top of Phase 2.
 
 ## Layout
 
@@ -55,7 +55,6 @@ uv run opencode-py resume thr_abc123 "and now show me bash.py"
 - Sub-agents / `task` tool (Phase 6)
 - Full MCP integration (Phase 5)
 - Sub-agents / `task` tool (Phase 6)
-- Context compaction (Phase 3)
 - Dedicated TUI (Phase 4)
 - Advanced streaming event UX polish (current streaming is terminal-first MVP)
-- Context compaction (Phase 3): not yet
+- More accurate token accounting for compaction trigger (current estimator is lightweight)

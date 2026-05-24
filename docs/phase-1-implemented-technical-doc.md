@@ -8,7 +8,7 @@
 
 ## 1. 实现范围总览
 
-当前已实现能力（Phase 1 + Phase 2）：
+当前已实现能力（Phase 1 + Phase 2 + Phase 3 核心）：
 
 1. 基于 LangGraph 的基础 Agent 循环（含工具调用回路）
 2. 多 Provider Router（Anthropic / OpenAI 基础切换）
@@ -18,8 +18,10 @@
 6. SQLite 会话持久化与 resume
 7. CLI 流式输出（基于 `astream_events`）
 8. 基础回归测试（pytest）
+9. Context overflow 检测 + auto-compaction
+10. Session metadata store + sessions/fork CLI
 
-核心未实现（不在本文范围）：MCP、sub-agent task、TUI、上下文压缩。
+核心未实现（不在本文范围）：MCP、sub-agent task、TUI。
 
 ---
 

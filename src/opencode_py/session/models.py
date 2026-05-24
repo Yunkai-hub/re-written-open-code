@@ -75,3 +75,27 @@ class AgentConfig(BaseModel):
         "Prefer concrete actions over speculation. Keep responses brief."
     )
     max_steps: int = 25
+
+
+class SessionMeta(BaseModel):
+    thread_id: str
+    title: str
+    created_at: float
+    updated_at: float
+    cwd: str
+    provider: str
+    model: str
+    parent_thread_id: str | None = None
+    fork_checkpoint_id: str | None = None
+    message_count: int = 0
+    compaction_count: int = 0
+    last_compacted_at: float | None = None
+    last_user_preview: str | None = None
+    archived: bool = False
+
+
+class SessionForkMeta(BaseModel):
+    source_thread_id: str
+    target_thread_id: str
+    fork_checkpoint_id: str | None = None
+    created_at: float

@@ -104,13 +104,18 @@
 
 ---
 
-## Phase 3（后续）— Session 完整化
-**状态**：⬜ 未开始
+## Phase 3（进行中）— Session 完整化
+**状态**：🟨 核心能力已实现，待补充更多手工 E2E 回归
 
-**计划内容**：
-1. Context overflow 检测
-2. Auto-compaction（历史总结压缩）
-3. session list/fork 元数据管理
+**已完成**：
+1. Context overflow 检测（基于 token 估算阈值）
+2. Auto-compaction（保留近期轮次 + 旧历史总结）
+3. session metadata store + `sessions` / `fork` CLI 命令
+4. Phase 3 测试新增（22 tests 全通过）
+
+**待继续完善**：
+- 更精确 tokenizer 计数（当前为轻量估算）
+- compaction 提示词策略与可观测性打磨
 
 ---
 
