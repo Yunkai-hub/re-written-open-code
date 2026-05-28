@@ -16,14 +16,18 @@ from opencode_py.session.models import AgentConfig
 from opencode_py.tools import registry
 
 
-def _build_llm(agent: AgentConfig):
-    llm = build_chat_model(agent, settings)
+def _tool_schemas() -> list[dict]:
     tools = []
     for t in registry.all_tools():
         schema = t.args_schema()
         schema.pop("title", None)
         tools.append({"name": t.name, "description": t.description, "input_schema": schema})
-    return llm.bind_tools(tools)
+    return tools
+
+
+def _build_llm(agent: AgentConfig):
+    llm = build_chat_model(agent, settings)
+    return llm.bind_tools(_tool_schemas())
 
 
 def _build_plain_llm(agent: AgentConfig):
@@ -91,6 +95,51 @@ def _estimate_message_tokens(messages: list[BaseMessage], agent: AgentConfig | N
         pass
 
     return _estimate_message_tokens_fallback(messages)
+
+
+def _estimate_payload_tokens(
+    prepared_messages: list[BaseMessage],
+    agent: AgentConfig | None = None,
+    include_tools: bool = True,
+) -> int:
+    estimated = _estimate_message_tokens(prepared_messages, agent)
+    if include_tools:
+        tools = _tool_schemas()
+        try:
+            tool_overhead = _estimate_message_tokens_fallback([HumanMessage(content=json.dumps(tools, ensure_ascii=False))])
+        except Exception:
+            tool_overhead = 0
+        estimated += tool_overhead
+    return max(1, int(estimated))
+
+
+def _apply_runtime_calibration(estimated_tokens: int, state: AgentState) -> int:
+    ratio = state.get("runtime_ctx_calibration_ratio", 1.0)
+    try:
+        ratio_f = float(ratio)
+    except Exception:
+        ratio_f = 1.0
+    ratio_f = min(2.0, max(0.5, ratio_f))
+    return max(1, int(estimated_tokens * ratio_f))
+
+
+def _update_runtime_calibration(state: AgentState, observed_input_tokens: int, estimated_payload_tokens: int) -> dict:
+    if observed_input_tokens <= 0 or estimated_payload_tokens <= 0:
+        return {}
+
+    observed_ratio = observed_input_tokens / max(1.0, float(estimated_payload_tokens))
+    observed_ratio = min(2.0, max(0.5, observed_ratio))
+
+    prev = state.get("runtime_ctx_calibration_ratio", 1.0)
+    try:
+        prev_f = float(prev)
+    except Exception:
+        prev_f = 1.0
+
+    alpha = 0.2
+    next_ratio = (1.0 - alpha) * prev_f + alpha * observed_ratio
+    next_ratio = min(2.0, max(0.5, next_ratio))
+    return {"runtime_ctx_calibration_ratio": next_ratio}
 
 
 def _is_context_overflow(estimated_tokens: int) -> bool:
@@ -168,9 +217,15 @@ def build_graph(prompter: PermissionPrompter | None = None, checkpointer=None):
     async def check_overflow(state: AgentState) -> dict:
         agent = _agent_from_state(state)
         visible = _visible_messages(state)
-        estimated = _estimate_message_tokens(visible, agent)
-        overflow = _is_context_overflow(estimated) or bool(state.get("force_compact", False))
-        return {"estimated_tokens": estimated, "overflow": overflow}
+        prepared = _normalize_messages_for_llm(visible, agent.system_prompt)
+        estimated_payload = _estimate_payload_tokens(prepared, agent, include_tools=True)
+        calibrated = _apply_runtime_calibration(estimated_payload, state)
+        overflow = _is_context_overflow(calibrated) or bool(state.get("force_compact", False))
+        return {
+            "estimated_payload_tokens": estimated_payload,
+            "estimated_tokens": calibrated,
+            "overflow": overflow,
+        }
 
     def route_overflow(state: AgentState) -> Literal["compact_context", "llm_call"]:
         if state.get("overflow", False):
@@ -209,7 +264,17 @@ def build_graph(prompter: PermissionPrompter | None = None, checkpointer=None):
         visible = _visible_messages(state)
         prepared = _normalize_messages_for_llm(visible, agent.system_prompt)
         ai: AIMessage = await llm.ainvoke(prepared)
-        return {"messages": [ai], "step_count": state.get("step_count", 0) + 1}
+
+        usage = getattr(ai, "usage_metadata", None) or {}
+        observed_in = int(usage.get("input_tokens", 0) or usage.get("input_token_count", 0) or 0)
+        estimated_payload = int(state.get("estimated_payload_tokens", 0) or 0)
+        calibration_update = _update_runtime_calibration(state, observed_in, estimated_payload)
+
+        return {
+            "messages": [ai],
+            "step_count": state.get("step_count", 0) + 1,
+            **calibration_update,
+        }
 
     def route_event(state: AgentState) -> dict:
         last = state["messages"][-1]
@@ -316,5 +381,8 @@ __all__ = [
     "_ruleset_from_state",
     "_ruleset_to_state",
     "_estimate_message_tokens",
+    "_estimate_payload_tokens",
+    "_apply_runtime_calibration",
+    "_update_runtime_calibration",
     "_split_head_tail_messages",
 ]

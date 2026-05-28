@@ -12,7 +12,7 @@ from rich.markdown import Markdown
 
 from opencode_py.agent.graph import AsyncSqliteSaver, build_graph
 from opencode_py.config import settings
-from opencode_py.session.models import AgentConfig
+from opencode_py.session.models import AgentConfig, SessionMeta
 from opencode_py.session.store import (
     get_session,
     init_schema,
@@ -52,6 +52,51 @@ def _session_title_from_message(message: str | None) -> str:
     return text[:60] if len(text) > 60 else text
 
 
+def _print_sessions_for_pick(rows: list[SessionMeta]) -> None:
+    for idx, s in enumerate(rows, start=1):
+        parent = f" parent={s.parent_thread_id}" if s.parent_thread_id else ""
+        console.print(
+            f"[{idx}] {s.thread_id}  [{s.provider}/{s.model}]  msgs={s.message_count}  compact={s.compaction_count}{parent}\n"
+            f"    title: {s.title}\n"
+            f"    cwd: {s.cwd}"
+        )
+
+
+def _pick_session_interactively(db_path: Path, current_thread_id: str) -> str | None:
+    rows = list_sessions(db_path, limit=50)
+    if not rows:
+        console.print("No sessions yet.")
+        return None
+
+    console.print("\n[bold]Available sessions[/bold]")
+    _print_sessions_for_pick(rows)
+    choice = console.input("Select session index/thread_id (empty to cancel): ").strip()
+    if not choice:
+        return None
+
+    selected: str | None = None
+    if choice.isdigit():
+        idx = int(choice)
+        if 1 <= idx <= len(rows):
+            selected = rows[idx - 1].thread_id
+    else:
+        selected = choice
+
+    if not selected:
+        console.print("[yellow]Invalid selection.[/yellow]")
+        return None
+
+    if get_session(db_path, selected) is None:
+        console.print(f"[yellow]Session not found:[/yellow] {selected}")
+        return None
+
+    if selected == current_thread_id:
+        console.print("[dim]Already on this session.[/dim]")
+        return selected
+
+    return selected
+
+
 async def _run_chat(thread_id: str, initial_message: str | None, parent_thread_id: str | None = None) -> None:
     db_path = settings.session_db_path()
     init_schema(db_path)
@@ -87,6 +132,21 @@ async def _run_chat(thread_id: str, initial_message: str | None, parent_thread_i
                 continue
             if user_text in ("/exit", "/quit"):
                 break
+
+            if user_text.strip().lower() == "/sessions":
+                selected = _pick_session_interactively(db_path, thread_id)
+                if selected and selected != thread_id:
+                    thread_id = selected
+                    cfg = {
+                        "configurable": {"thread_id": thread_id},
+                        "recursion_limit": max(120, settings.max_steps * 8),
+                    }
+                    resumed = get_session(db_path, thread_id)
+                    if resumed:
+                        console.print(f"[green]Switched to session:[/green] {thread_id}  [dim]{resumed.title}[/dim]")
+                    else:
+                        console.print(f"[green]Switched to session:[/green] {thread_id}")
+                continue
 
             compact_cmd = user_text.strip().lower()
             compact_only = compact_cmd in {"/compact", "/compat"}
@@ -177,8 +237,10 @@ async def _run_chat(thread_id: str, initial_message: str | None, parent_thread_i
                 turn_out = int(usage.get("output_tokens", 0) or usage.get("output_token_count", 0) or 0)
 
             estimated_tokens = int(values.get("estimated_tokens", 0) or 0)
+            estimated_payload_tokens = int(values.get("estimated_payload_tokens", 0) or 0)
+            calibration_ratio = float(values.get("runtime_ctx_calibration_ratio", 1.0) or 1.0)
             console.print(
-                f"[dim]tokens(turn): in={turn_in} out={turn_out} | total: in={total_in} out={total_out} | estimated_ctx={estimated_tokens} compact={int(compaction_count or 0)}[/dim]"
+                f"[dim]tokens(turn): in={turn_in} out={turn_out} | total: in={total_in} out={total_out} | estimated_ctx={estimated_tokens} payload_est={estimated_payload_tokens} calib={calibration_ratio:.3f} compact={int(compaction_count or 0)}[/dim]"
             )
 
             touch_session(

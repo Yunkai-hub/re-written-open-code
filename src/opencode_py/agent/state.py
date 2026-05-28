@@ -16,7 +16,9 @@ class AgentState(TypedDict, total=False):
     approved_ruleset: list[dict[str, str]]
 
     tokens: dict[str, int]
+    estimated_payload_tokens: int
     estimated_tokens: int
+    runtime_ctx_calibration_ratio: float
     overflow: bool
     force_compact: bool
     compact_only: bool

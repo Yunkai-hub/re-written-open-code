@@ -5,7 +5,12 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_prefix="OPENCODE_", env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_prefix="OPENCODE_",
+        env_file=".env",
+        extra="ignore",
+        populate_by_name=True,
+    )
 
     provider: str = "anthropic"
     anthropic_api_key: str = Field(default="", validation_alias="ANTHROPIC_API_KEY")
