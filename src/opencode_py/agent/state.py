@@ -18,8 +18,15 @@ class AgentState(TypedDict, total=False):
     tokens: dict[str, int]
     estimated_payload_tokens: int
     estimated_tokens: int
+    token_counter_source: str
     runtime_ctx_calibration_ratio: float
     overflow: bool
+    overflow_reason: str
+    compaction_visible_tokens_before: int
+    compaction_visible_tokens_after: int
+    compaction_last_ratio: float
+    compaction_trigger_count: int
+    last_compacted_at: float
     force_compact: bool
     compact_only: bool
     visible_start_index: int

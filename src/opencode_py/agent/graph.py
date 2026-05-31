@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import time
 from typing import Literal
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage
@@ -82,8 +83,7 @@ def _estimate_message_tokens_fallback(messages: list[BaseMessage]) -> int:
     return (chars // 4) + max(1, len(messages) * 8)
 
 
-def _estimate_message_tokens(messages: list[BaseMessage], agent: AgentConfig | None = None) -> int:
-    agent = agent or AgentConfig()
+def _estimate_tokens_via_model_api(messages: list[BaseMessage], agent: AgentConfig) -> int | None:
     try:
         llm = _build_plain_llm(agent)
         estimator = getattr(llm, "get_num_tokens_from_messages", None)
@@ -92,17 +92,49 @@ def _estimate_message_tokens(messages: list[BaseMessage], agent: AgentConfig | N
             if isinstance(counted, int) and counted > 0:
                 return counted
     except Exception:
-        pass
+        return None
+    return None
 
-    return _estimate_message_tokens_fallback(messages)
+
+def _estimate_tokens_via_provider(messages: list[BaseMessage], agent: AgentConfig) -> int | None:
+    provider = settings.provider.lower().strip()
+    if provider not in {"anthropic", "openai"}:
+        return None
+    return _estimate_tokens_via_model_api(messages, agent)
 
 
-def _estimate_payload_tokens(
+def _estimate_message_tokens_with_source(messages: list[BaseMessage], agent: AgentConfig | None = None) -> tuple[int, str]:
+    agent = agent or AgentConfig()
+    strategy = settings.compaction_token_counter
+
+    if strategy in {"auto", "provider"}:
+        counted = _estimate_tokens_via_provider(messages, agent)
+        if counted is not None:
+            return counted, "provider"
+        if strategy == "provider":
+            return _estimate_message_tokens_fallback(messages), "fallback"
+
+    if strategy in {"auto", "model_api"}:
+        counted = _estimate_tokens_via_model_api(messages, agent)
+        if counted is not None:
+            return counted, "model_api"
+        if strategy == "model_api":
+            return _estimate_message_tokens_fallback(messages), "fallback"
+
+    return _estimate_message_tokens_fallback(messages), "fallback"
+
+
+def _estimate_message_tokens(messages: list[BaseMessage], agent: AgentConfig | None = None) -> int:
+    estimated, _ = _estimate_message_tokens_with_source(messages, agent)
+    return estimated
+
+
+def _estimate_payload_tokens_with_source(
     prepared_messages: list[BaseMessage],
     agent: AgentConfig | None = None,
     include_tools: bool = True,
-) -> int:
-    estimated = _estimate_message_tokens(prepared_messages, agent)
+) -> tuple[int, str]:
+    estimated, source = _estimate_message_tokens_with_source(prepared_messages, agent)
     if include_tools:
         tools = _tool_schemas()
         try:
@@ -110,7 +142,16 @@ def _estimate_payload_tokens(
         except Exception:
             tool_overhead = 0
         estimated += tool_overhead
-    return max(1, int(estimated))
+    return max(1, int(estimated)), source
+
+
+def _estimate_payload_tokens(
+    prepared_messages: list[BaseMessage],
+    agent: AgentConfig | None = None,
+    include_tools: bool = True,
+) -> int:
+    estimated, _ = _estimate_payload_tokens_with_source(prepared_messages, agent, include_tools=include_tools)
+    return estimated
 
 
 def _apply_runtime_calibration(estimated_tokens: int, state: AgentState) -> int:
@@ -212,20 +253,29 @@ def build_graph(prompter: PermissionPrompter | None = None, checkpointer=None):
         return {
             "step_count": state.get("step_count", 0),
             "compaction_count": state.get("compaction_count", 0),
+            "compaction_trigger_count": state.get("compaction_trigger_count", 0),
         }
 
     async def check_overflow(state: AgentState) -> dict:
         agent = _agent_from_state(state)
         visible = _visible_messages(state)
         prepared = _normalize_messages_for_llm(visible, agent.system_prompt)
-        estimated_payload = _estimate_payload_tokens(prepared, agent, include_tools=True)
+        estimated_payload, token_source = _estimate_payload_tokens_with_source(prepared, agent, include_tools=True)
         calibrated = _apply_runtime_calibration(estimated_payload, state)
-        overflow = _is_context_overflow(calibrated) or bool(state.get("force_compact", False))
-        return {
+        forced = bool(state.get("force_compact", False))
+        overflow = _is_context_overflow(calibrated) or forced
+        overflow_reason = "force_compact" if forced else ("threshold" if overflow else "none")
+        updates = {
             "estimated_payload_tokens": estimated_payload,
             "estimated_tokens": calibrated,
+            "token_counter_source": token_source,
             "overflow": overflow,
+            "overflow_reason": overflow_reason,
+            "compaction_visible_tokens_before": calibrated,
         }
+        if overflow:
+            updates["compaction_trigger_count"] = state.get("compaction_trigger_count", 0) + 1
+        return updates
 
     def route_overflow(state: AgentState) -> Literal["compact_context", "llm_call"]:
         if state.get("overflow", False):
@@ -237,20 +287,38 @@ def build_graph(prompter: PermissionPrompter | None = None, checkpointer=None):
         agent = _agent_from_state(state)
         summary_prev = state.get("last_compaction_summary")
 
-        head, _, split_idx = _split_head_tail_messages(messages, settings.compaction_tail_turns)
+        head, tail, split_idx = _split_head_tail_messages(messages, settings.compaction_tail_turns)
         if not head:
-            return {"overflow": False, "force_compact": False}
+            return {
+                "overflow": False,
+                "force_compact": False,
+                "compaction_visible_tokens_after": int(state.get("estimated_tokens", 0) or 0),
+                "compaction_last_ratio": 1.0,
+            }
 
         prompt = _build_compaction_prompt(head, summary_prev)
         summary = await _compact_with_llm(agent, prompt)
+        after_visible = [HumanMessage(content=f"[COMPACTION SUMMARY]\n{summary}"), *tail]
+        after_prepared = _normalize_messages_for_llm(after_visible, agent.system_prompt)
+        after_payload, _ = _estimate_payload_tokens_with_source(after_prepared, agent, include_tools=True)
+        after_calibrated = _apply_runtime_calibration(after_payload, state)
+
+        before = int(state.get("compaction_visible_tokens_before", state.get("estimated_tokens", 0)) or 0)
+        ratio = 1.0
+        if before > 0:
+            ratio = round(after_calibrated / max(1, before), 4)
 
         # Keep full history in storage/state; future LLM calls use visible window only.
         return {
             "last_compaction_summary": summary,
             "visible_start_index": split_idx,
             "compaction_count": state.get("compaction_count", 0) + 1,
+            "last_compacted_at": time.time(),
+            "compaction_visible_tokens_after": after_calibrated,
+            "compaction_last_ratio": ratio,
             "overflow": False,
             "force_compact": False,
+            "overflow_reason": "none",
         }
 
     def route_after_compact(state: AgentState) -> Literal["llm_call", "end"]:
@@ -382,6 +450,8 @@ __all__ = [
     "_ruleset_to_state",
     "_estimate_message_tokens",
     "_estimate_payload_tokens",
+    "_estimate_message_tokens_with_source",
+    "_estimate_payload_tokens_with_source",
     "_apply_runtime_calibration",
     "_update_runtime_calibration",
     "_split_head_tail_messages",

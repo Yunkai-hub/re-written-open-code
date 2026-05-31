@@ -2,7 +2,7 @@
 
 > 项目目标：使用 **Python + LangGraph** 复刻开源 opencode（以 `sst/opencode` 为参考），面向可持续演进到产品级能力。
 >
-> 更新时间：2026-05-21
+> 更新时间：2026-05-31
 
 ---
 
@@ -111,7 +111,7 @@
 1. Context overflow 检测（基于 token 估算阈值）
 2. Auto-compaction（保留近期轮次 + 旧历史总结）
 3. session metadata store + `sessions` / `fork` CLI 命令
-4. Phase 3 测试新增（22 tests 全通过）
+4. Phase 3 测试新增（24 tests 全通过）
 
 **待继续完善**：
 - 更精确 tokenizer 计数（当前为轻量估算）
@@ -160,9 +160,9 @@
 ## 4. 下一次继续建议（从这里接）
 
 建议按以下顺序继续：
-1. 跑完 [docs/phase-1-manual-test.md](phase-1-manual-test.md) 剧本并补记录（尤其是 provider=openai 分支）
-2. 增加 route_event / exec_tools 的行为级测试（包含 tool_call 分支覆盖）
-3. 进入 Phase 3：context overflow + compaction
+1. Phase 3 手工 E2E 回归脚本已补齐：[docs/phase-3-manual-test.md](phase-3-manual-test.md)（覆盖 `/compact`、`/sessions`、`fork`）
+2. 将 compaction token 估算从轻量策略升级为 provider-aware tokenizer，并增加校准效果对比
+3. 增加 compaction 可观测性（触发前后上下文规模、触发频次、摘要质量回归）
 
 ---
 

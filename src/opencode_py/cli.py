@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import sqlite3
 import uuid
 from pathlib import Path
 
@@ -56,9 +57,10 @@ def _print_sessions_for_pick(rows: list[SessionMeta]) -> None:
     for idx, s in enumerate(rows, start=1):
         parent = f" parent={s.parent_thread_id}" if s.parent_thread_id else ""
         console.print(
-            f"[{idx}] {s.thread_id}  [{s.provider}/{s.model}]  msgs={s.message_count}  compact={s.compaction_count}{parent}\n"
+            f"[{idx}] {s.thread_id}  [{s.provider}/{s.model}]  msgs={s.message_count}  compact={s.compaction_count} trig={s.compaction_trigger_count}{parent}\n"
             f"    title: {s.title}\n"
-            f"    cwd: {s.cwd}"
+            f"    cwd: {s.cwd}\n"
+            f"    overflow={s.last_overflow_reason or '-'} counter={s.last_token_counter_source or '-'} ratio={s.last_compaction_ratio:.3f}"
         )
 
 
@@ -95,6 +97,36 @@ def _pick_session_interactively(db_path: Path, current_thread_id: str) -> str | 
         return selected
 
     return selected
+
+
+def _copy_thread_sqlite_fallback(db_path: Path, source_thread_id: str, target_thread_id: str) -> None:
+    conn = sqlite3.connect(str(db_path))
+    try:
+        with conn:
+            conn.execute(
+                """
+                INSERT INTO checkpoints (
+                    thread_id, checkpoint_ns, checkpoint_id, parent_checkpoint_id, type, checkpoint, metadata
+                )
+                SELECT ?, checkpoint_ns, checkpoint_id, parent_checkpoint_id, type, checkpoint, metadata
+                FROM checkpoints
+                WHERE thread_id = ?
+                """,
+                (target_thread_id, source_thread_id),
+            )
+            conn.execute(
+                """
+                INSERT INTO writes (
+                    thread_id, checkpoint_ns, checkpoint_id, task_id, idx, channel, type, value
+                )
+                SELECT ?, checkpoint_ns, checkpoint_id, task_id, idx, channel, type, value
+                FROM writes
+                WHERE thread_id = ?
+                """,
+                (target_thread_id, source_thread_id),
+            )
+    finally:
+        conn.close()
 
 
 async def _run_chat(thread_id: str, initial_message: str | None, parent_thread_id: str | None = None) -> None:
@@ -201,6 +233,7 @@ async def _run_chat(thread_id: str, initial_message: str | None, parent_thread_i
             values = result.values if isinstance(result.values, dict) else {}
             messages = values.get("messages", [])
             compaction_count = values.get("compaction_count", 0)
+            compaction_trigger_count = int(values.get("compaction_trigger_count", 0) or 0)
 
             if compact_only:
                 summary = values.get("last_compaction_summary") or ""
@@ -239,8 +272,13 @@ async def _run_chat(thread_id: str, initial_message: str | None, parent_thread_i
             estimated_tokens = int(values.get("estimated_tokens", 0) or 0)
             estimated_payload_tokens = int(values.get("estimated_payload_tokens", 0) or 0)
             calibration_ratio = float(values.get("runtime_ctx_calibration_ratio", 1.0) or 1.0)
+            overflow_reason = str(values.get("overflow_reason", "none") or "none")
+            token_counter_source = str(values.get("token_counter_source", "fallback") or "fallback")
+            compaction_before = int(values.get("compaction_visible_tokens_before", estimated_tokens) or estimated_tokens)
+            compaction_after = int(values.get("compaction_visible_tokens_after", estimated_tokens) or estimated_tokens)
+            compaction_ratio = float(values.get("compaction_last_ratio", 1.0) or 1.0)
             console.print(
-                f"[dim]tokens(turn): in={turn_in} out={turn_out} | total: in={total_in} out={total_out} | estimated_ctx={estimated_tokens} payload_est={estimated_payload_tokens} calib={calibration_ratio:.3f} compact={int(compaction_count or 0)}[/dim]"
+                f"[dim]tokens(turn): in={turn_in} out={turn_out} | total: in={total_in} out={total_out} | estimated_ctx={estimated_tokens} payload_est={estimated_payload_tokens} calib={calibration_ratio:.3f} compact={int(compaction_count or 0)} trig={compaction_trigger_count} overflow={overflow_reason} counter={token_counter_source} window={compaction_before}->{compaction_after} ratio={compaction_ratio:.3f}[/dim]"
             )
 
             touch_session(
@@ -248,7 +286,14 @@ async def _run_chat(thread_id: str, initial_message: str | None, parent_thread_i
                 thread_id,
                 message_count=len(messages),
                 compaction_count=int(compaction_count or 0),
+                compaction_trigger_count=compaction_trigger_count,
+                last_compacted_at=(float(values.get("last_compacted_at")) if values.get("last_compacted_at") is not None else None),
                 last_user_preview=(user_text if not compact_only else "/compact")[:200],
+                last_overflow_reason=overflow_reason,
+                last_token_counter_source=token_counter_source,
+                last_compaction_tokens_before=compaction_before,
+                last_compaction_tokens_after=compaction_after,
+                last_compaction_ratio=compaction_ratio,
             )
             console.print()
 
@@ -281,9 +326,10 @@ def sessions_cmd(limit: int = typer.Option(20, min=1, max=200)) -> None:
     for s in rows:
         parent = f" parent={s.parent_thread_id}" if s.parent_thread_id else ""
         console.print(
-            f"- {s.thread_id}  [{s.provider}/{s.model}]  msgs={s.message_count}  compact={s.compaction_count}{parent}\n"
+            f"- {s.thread_id}  [{s.provider}/{s.model}]  msgs={s.message_count}  compact={s.compaction_count} trig={s.compaction_trigger_count}{parent}\n"
             f"  title: {s.title}\n"
-            f"  cwd: {s.cwd}"
+            f"  cwd: {s.cwd}\n"
+            f"  overflow={s.last_overflow_reason or '-'} counter={s.last_token_counter_source or '-'} ratio={s.last_compaction_ratio:.3f}"
         )
 
 
@@ -308,7 +354,10 @@ def fork_cmd(
         async with AsyncSqliteSaver.from_conn_string(str(db_path)) as saver:
             await saver.acopy_thread(thread_id, target_thread)
 
-    asyncio.run(_copy())
+    try:
+        asyncio.run(_copy())
+    except NotImplementedError:
+        _copy_thread_sqlite_fallback(db_path, thread_id, target_thread)
 
     meta = make_session_meta(
         target_thread,

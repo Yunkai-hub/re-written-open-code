@@ -1,6 +1,6 @@
 from langchain_core.messages import HumanMessage
 
-from opencode_py.agent.graph import _is_context_overflow, _visible_messages, build_graph
+from opencode_py.agent.graph import _is_context_overflow, _update_runtime_calibration, _visible_messages, build_graph
 
 
 def test_graph_contains_overflow_nodes():
@@ -38,3 +38,10 @@ def test_visible_messages_uses_summary_and_tail_window():
     assert isinstance(visible[0], HumanMessage)
     assert "COMPACTION SUMMARY" in str(visible[0].content)
     assert visible[1].content == "new1"
+
+
+def test_runtime_calibration_update_returns_ratio():
+    state = {"runtime_ctx_calibration_ratio": 1.0}
+    updated = _update_runtime_calibration(state, observed_input_tokens=120, estimated_payload_tokens=100)
+    assert "runtime_ctx_calibration_ratio" in updated
+    assert 0.5 <= float(updated["runtime_ctx_calibration_ratio"]) <= 2.0

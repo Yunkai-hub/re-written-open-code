@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import Literal
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -27,6 +28,7 @@ class Settings(BaseSettings):
     compaction_reserved_tokens: int = 12_000
     compaction_tail_turns: int = 2
     compaction_max_summary_chars: int = 6_000
+    compaction_token_counter: Literal["auto", "provider", "model_api", "fallback"] = "auto"
 
     data_dir: Path = Path.home() / ".opencode-py"
 

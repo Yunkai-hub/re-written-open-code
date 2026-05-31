@@ -89,8 +89,14 @@ class SessionMeta(BaseModel):
     fork_checkpoint_id: str | None = None
     message_count: int = 0
     compaction_count: int = 0
+    compaction_trigger_count: int = 0
     last_compacted_at: float | None = None
     last_user_preview: str | None = None
+    last_overflow_reason: str | None = None
+    last_token_counter_source: str | None = None
+    last_compaction_tokens_before: int = 0
+    last_compaction_tokens_after: int = 0
+    last_compaction_ratio: float = 1.0
     archived: bool = False
 
 
