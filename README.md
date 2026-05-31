@@ -2,12 +2,13 @@
 
 Python + LangGraph reimplementation of [sst/opencode](https://github.com/sst/opencode).
 
-Status: **Phase 3 (in progress)** — session governance (overflow detection, auto-compaction, sessions/fork metadata) is implemented on top of Phase 2.
+Status: **Phase 5 (in progress)** — Phase 3 session governance + Phase 5A/5B MCP integration (config loading, stdio/SSE transport client path, dynamic tool injection) are implemented.
 
 ## Layout
 
 - [reference/opencode/](reference/opencode/) — upstream TypeScript source, read-only reference.
 - [docs/phase-0-architecture.md](docs/phase-0-architecture.md) — module-by-module map of opencode → LangGraph.
+- [docs/phase-5-implemented-technical-doc.md](docs/phase-5-implemented-technical-doc.md) — Phase 5A/5B MCP implementation notes.
 - [src/opencode_py/](src/opencode_py/) — our implementation.
 
 ## Quick start
@@ -31,10 +32,15 @@ export ANTHROPIC_API_KEY=sk-ant-...
 # 4. environment check
 uv run opencode-py doctor
 
-# 5. start a chat
+# 5. optional MCP local test setup
+export OPENCODE_MCP_ENABLED=true
+export OPENCODE_MCP_CONFIG_PATH=./mcp.json
+uv run opencode-py mcp-tools
+
+# 6. start a chat
 uv run opencode-py chat "list the python files under src/"
 
-# 6. resume a prior session
+# 7. resume a prior session
 uv run opencode-py resume thr_abc123 "and now show me bash.py"
 ```
 
@@ -48,13 +54,24 @@ uv run opencode-py resume thr_abc123 "and now show me bash.py"
 | `edit` | ask | exact substring replace (with `replace_all`) |
 | `bash` | ask | runs via Git Bash / WSL / cmd.exe fallback on Windows |
 
-## What's missing vs. opencode (will come in later phases)
+## MCP integration (Phase 5A/5B)
+
+- MCP servers are configured through `OPENCODE_MCP_ENABLED` and `OPENCODE_MCP_CONFIG_PATH`.
+- Supported transport paths in current implementation:
+  - `stdio`
+  - `sse` (HTTP request path)
+- Loaded MCP tools are dynamically injected into the runtime tool registry with safe names like `mcp_<server>_<tool>`.
+- Permissions use `mcp` policy channel (default action: `ask`).
+- You can list currently loaded MCP tools with:
+
+```bash
+uv run opencode-py mcp-tools
+```
+
+## What's missing vs. opencode (next milestones)
 
 - TUI (Phase 4): currently plain `rich` REPL
-- MCP integration (Phase 5)
+- Full MCP production hardening (reconnect strategy, richer SSE session semantics, stronger auth/error telemetry)
 - Sub-agents / `task` tool (Phase 6)
-- Full MCP integration (Phase 5)
-- Sub-agents / `task` tool (Phase 6)
-- Dedicated TUI (Phase 4)
 - Advanced streaming event UX polish (current streaming is terminal-first MVP)
 - More accurate token accounting for compaction trigger (current estimator is lightweight)

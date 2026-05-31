@@ -2,7 +2,7 @@
 
 > 项目目标：使用 **Python + LangGraph** 复刻开源 opencode（以 `sst/opencode` 为参考），面向可持续演进到产品级能力。
 >
-> 更新时间：2026-05-31
+> 更新时间：2026-06-01
 
 ---
 
@@ -129,13 +129,20 @@
 
 ---
 
-## Phase 5（后续）— MCP 集成
-**状态**：⬜ 未开始
+## Phase 5（进行中）— MCP 集成
+**状态**：🟨 Phase 5A/5B 核心链路已实现，待进一步生产化打磨
 
-**计划内容**：
-1. MCP server 配置加载
-2. stdio/SSE transport
-3. MCP tool 动态注入 registry
+**已完成**：
+1. MCP server 配置加载（JSON + pydantic 校验）
+2. transport 路径接入：`stdio` + `sse`
+3. MCP tool 动态注入 registry（命名安全化为 `mcp_<server>_<tool>`）
+4. CLI 命令补充：`mcp-tools`，并在 chat REPL 中支持 `/mcp-tools`
+5. strict/non-strict 启动行为与测试覆盖（Phase 5 相关测试已通过）
+
+**待继续完善**：
+- SSE 连接语义与重连策略增强
+- 更完整的鉴权/错误可观测性
+- 与真实远端 MCP 服务的端到端回归矩阵
 
 ---
 
@@ -160,9 +167,9 @@
 ## 4. 下一次继续建议（从这里接）
 
 建议按以下顺序继续：
-1. Phase 3 手工 E2E 回归脚本已补齐：[docs/phase-3-manual-test.md](phase-3-manual-test.md)（覆盖 `/compact`、`/sessions`、`fork`）
-2. 将 compaction token 估算从轻量策略升级为 provider-aware tokenizer，并增加校准效果对比
-3. 增加 compaction 可观测性（触发前后上下文规模、触发频次、摘要质量回归）
+1. Phase 5 与真实远端 MCP server 做 E2E 回归（stdio + sse 场景）
+2. 增强 SSE transport 的连接稳定性与错误恢复策略
+3. 继续推进 Phase 4（TUI）骨架，打通消息流与权限弹窗
 
 ---
 
