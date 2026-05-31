@@ -13,6 +13,7 @@ from rich.markdown import Markdown
 
 from opencode_py.agent.graph import AsyncSqliteSaver, build_graph
 from opencode_py.config import settings
+from opencode_py.mcp import MCPBootstrapResult, bootstrap_mcp_sync
 from opencode_py.session.models import AgentConfig, SessionMeta
 from opencode_py.session.store import (
     get_session,
@@ -26,6 +27,21 @@ from opencode_py.session.store import (
 
 app = typer.Typer(add_completion=False, help="opencode-py — Python reimplementation of opencode on LangGraph.")
 console = Console()
+
+
+_LAST_MCP_BOOTSTRAP = MCPBootstrapResult(enabled=False)
+
+
+def _bootstrap_mcp_if_enabled() -> MCPBootstrapResult:
+    global _LAST_MCP_BOOTSTRAP
+    _LAST_MCP_BOOTSTRAP = bootstrap_mcp_sync()
+    if _LAST_MCP_BOOTSTRAP.enabled:
+        console.print(
+            f"[dim]mcp: servers={_LAST_MCP_BOOTSTRAP.connected_servers}/{_LAST_MCP_BOOTSTRAP.configured_servers} tools={_LAST_MCP_BOOTSTRAP.loaded_tools} errors={len(_LAST_MCP_BOOTSTRAP.errors)}[/dim]"
+        )
+        for err in _LAST_MCP_BOOTSTRAP.errors:
+            console.print(f"[yellow]mcp warning:[/yellow] {err}")
+    return _LAST_MCP_BOOTSTRAP
 
 
 def _ensure_key() -> None:
@@ -302,6 +318,7 @@ async def _run_chat(thread_id: str, initial_message: str | None, parent_thread_i
 def chat(message: str | None = typer.Argument(None, help="Optional first message; otherwise enter REPL.")) -> None:
     """Start a new chat session."""
     _ensure_key()
+    _bootstrap_mcp_if_enabled()
     thread_id = f"thr_{uuid.uuid4().hex[:12]}"
     asyncio.run(_run_chat(thread_id, message))
 
@@ -310,6 +327,7 @@ def chat(message: str | None = typer.Argument(None, help="Optional first message
 def resume(thread_id: str, message: str | None = typer.Argument(None)) -> None:
     """Resume a prior session by thread_id."""
     _ensure_key()
+    _bootstrap_mcp_if_enabled()
     asyncio.run(_run_chat(thread_id, message))
 
 
@@ -385,6 +403,13 @@ def doctor() -> None:
     console.print(f"context window: {settings.context_window_tokens}")
     console.print(f"compaction enabled: {settings.compaction_enabled}")
     console.print(f"compaction trigger tokens: {settings.compaction_trigger_tokens()}")
+    console.print(f"mcp enabled: {settings.mcp_enabled}")
+    console.print(f"mcp config path: {settings.mcp_config_path or '(unset)'}")
+    bootstrap = _bootstrap_mcp_if_enabled()
+    if bootstrap.enabled:
+        console.print(
+            f"mcp bootstrap: servers={bootstrap.connected_servers}/{bootstrap.configured_servers} tools={bootstrap.loaded_tools} errors={len(bootstrap.errors)}"
+        )
     console.print(
         f"api key set: {bool(settings.anthropic_api_key or os.environ.get('ANTHROPIC_API_KEY') or settings.openai_api_key or os.environ.get('OPENAI_API_KEY'))}"
     )

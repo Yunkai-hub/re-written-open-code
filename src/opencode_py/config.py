@@ -30,6 +30,11 @@ class Settings(BaseSettings):
     compaction_max_summary_chars: int = 6_000
     compaction_token_counter: Literal["auto", "provider", "model_api", "fallback"] = "auto"
 
+    mcp_enabled: bool = False
+    mcp_config_path: str = ""
+    mcp_startup_strict: bool = False
+    mcp_default_timeout_ms: int = 15_000
+
     data_dir: Path = Path.home() / ".opencode-py"
 
     def session_db_path(self) -> Path:

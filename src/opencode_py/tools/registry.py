@@ -3,7 +3,7 @@ from __future__ import annotations
 from opencode_py.tools.base import ToolDef
 from opencode_py.tools.builtin import bash, edit, glob_tool, read, write
 
-_TOOLS: dict[str, ToolDef] = {
+_BUILTIN_TOOLS: dict[str, ToolDef] = {
     t.name: t
     for t in (
         read.tool,
@@ -13,14 +13,35 @@ _TOOLS: dict[str, ToolDef] = {
         bash.tool,
     )
 }
+_DYNAMIC_TOOLS: dict[str, ToolDef] = {}
+
+
+def register(tool: ToolDef, *, dynamic: bool = True) -> None:
+    if dynamic:
+        _DYNAMIC_TOOLS[tool.name] = tool
+    else:
+        _BUILTIN_TOOLS[tool.name] = tool
+
+
+def register_many(tools: list[ToolDef], *, dynamic: bool = True) -> None:
+    for t in tools:
+        register(t, dynamic=dynamic)
+
+
+def clear_dynamic() -> None:
+    _DYNAMIC_TOOLS.clear()
 
 
 def all_tools() -> list[ToolDef]:
-    return list(_TOOLS.values())
+    merged = dict(_BUILTIN_TOOLS)
+    merged.update(_DYNAMIC_TOOLS)
+    return list(merged.values())
 
 
 def get(name: str) -> ToolDef | None:
-    return _TOOLS.get(name)
+    if name in _DYNAMIC_TOOLS:
+        return _DYNAMIC_TOOLS[name]
+    return _BUILTIN_TOOLS.get(name)
 
 
 def to_anthropic_schema() -> list[dict]:

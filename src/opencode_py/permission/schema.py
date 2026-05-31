@@ -43,5 +43,6 @@ DEFAULT_RULESET = Ruleset(
         Rule(permission="write", pattern="*", action="ask"),
         Rule(permission="edit", pattern="*", action="ask"),
         Rule(permission="bash", pattern="*", action="ask"),
+        Rule(permission="mcp", pattern="*", action="ask"),
     ]
 )

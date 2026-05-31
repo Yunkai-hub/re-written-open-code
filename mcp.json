@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "servers": {
+    "fake": {
+      "enabled": true,
+      "transport": "stdio",
+      "command": "python",
+      "args": ["fake_mcp_server.py"],
+      "timeout_ms": 15000
+    }
+  }
+}
